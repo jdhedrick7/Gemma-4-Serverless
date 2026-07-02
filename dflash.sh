@@ -138,7 +138,11 @@ flags_of () {
 }
 
 # ---- rungs --------------------------------------------------------------------
-rung e5_nightly --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPEC 5)"
+# Control rung: only meaningful after a vllm upgrade (A/B vs stable numbers).
+# SKIP_CONTROL=1 when running on the same vllm the eagle numbers came from.
+if [ "${SKIP_CONTROL:-0}" != 1 ]; then
+  rung e5_nightly --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPEC 5)"
+fi
 rung d8         --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 8)"
 rung d16        --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 16)"
 
