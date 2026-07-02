@@ -51,21 +51,29 @@ File: `tensorrt_llm/_torch/models/modeling_gemma4.py`
    exposes `spec` support), add whatever Llama4's `Gemma4ForCausalLM` is missing —
    verify against `DecoderModelForCausalLM` base + how Llama advertises. (TBD live.)
 
-### Serve command (trtllm-serve, config.yaml)
+### Serve command (VALIDATED live on rc20 — see JOURNAL L20)
 ```yaml
 # /workspace/trtllm_dflash.yaml
+attn_backend: TRTLLM        # REQUIRED: DFLASH sends K+1 tok/step; FlashInfer
+                            # (auto-picked at head_dim=256) rejects it
 speculative_config:
   decoding_type: DFlash
   max_draft_len: 8
-  speculative_model: /workspace/dflash_ft_vllm   # our finetuned head (or RedHat)
+  speculative_model: /workspace/dflash_ft_vllm   # finetuned head (or RedHat base)
   target_layer_ids: [1, 17, 29, 47, 58]
+  mask_token_id: 4
 ```
 ```bash
-trtllm-serve serve /workspace/gemma4_v2_text \   # bf16 target (sidesteps NVFP4 loader)
+# MPI env first (SSH bypasses nvidia_entrypoint.sh):
+export OPAL_PREFIX=/opt/hpcx/ompi OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+# NVFP4 target (loader #12764 FIXED on rc20). Must be TEXT-ONLY Gemma4ForCausalLM:
+#   python3 train/extract_text_nvfp4.py --dst /workspace/gemma4_v2_nvfp4_text
+trtllm-serve serve /workspace/gemma4_v2_nvfp4_text \
   --backend pytorch --host 0.0.0.0 --port 8000 \
-  --max_batch_size 1 --max_seq_len 4096 --config /workspace/trtllm_dflash.yaml
+  --max_batch_size 1 --max_seq_len 4096 --trust_remote_code \
+  --config /workspace/trtllm_dflash.yaml
 ```
-Then benchmark.py against :8000 (same harness).
+Then benchmark.py against :8000 (same harness). Just run `bash train/trtllm_serve.sh`.
 
 ## Container — REQUIRES ITS OWN POD (cannot pip into the vLLM container)
 Verified GPU-free: TRT-LLM pip wheels conflict irreconcilably with our vLLM
