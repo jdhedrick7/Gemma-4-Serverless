@@ -272,3 +272,19 @@ TRT-LLM's in-engine spec loop is exactly what beats vLLM's 9.2 ms Python-side wa
 TRT-LLM latest-main on the B200, serve gemma-4 + our DFlash head via
 `DFlashDecodingConfig`; if Gemma4 aux-capture is missing, patch the model class.
 That path is now the active fallback, not "flagged/not assumed".
+
+## L16 — vLLM CUDA-graph lever is already maxed (overhead is inherent, proven)
+
+Checked whether spec-decode was silently falling back to PIECEWISE cudagraphs
+(a fixable per-step overhead source). It is NOT: `AttentionCGSupport` enum is
+`ALWAYS=3 > UNIFORM_BATCH=2`; the FULL-decode-under-spec-decode gate only trips
+when support `< UNIFORM_BATCH(2)`. Our backend TRITON_ATTN declares
+`_cudagraph_support = ALWAYS(3)`, so peak_d8's spec-decode path **already ran
+under FULL cudagraphs**. No `--compilation-config`/cudagraph knob left to pull.
+
+**Consequence:** the measured 9.2 ms DFlash cycle (vs ~3 ms ideal) is inherent
+to vLLM's Python-orchestrated draft→verify→accept loop, not a misconfig. Every
+vLLM-internal overhead lever is now exhausted with proof. => the finetuned head
+lifts *acceptance* (→ ~500-700), but breaking past that to 1000 REQUIRES the
+lower-overhead in-engine loop = TRT-LLM (L15, staged in TRT_LLM_PLAN.md +
+patch_trtllm_gemma4.py + trtllm_serve.sh). TRT-LLM is now necessary, not optional.
