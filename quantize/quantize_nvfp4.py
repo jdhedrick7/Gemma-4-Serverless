@@ -128,9 +128,13 @@ def main() -> int:
 
     recipe = QuantizationModifier(targets="Linear", scheme="NVFP4", ignore=IGNORE)
 
+    # Pass the tokenizer as the processor explicitly: oneshot otherwise auto-loads
+    # the model's AutoProcessor (Gemma4Processor), which imports torchvision (absent
+    # in this text-only env). The tokenizer is the correct processor for text calib.
     print("[quant] running oneshot NVFP4…", flush=True)
     oneshot(
         model=model,
+        processor=tokenizer,
         dataset=ds,
         recipe=recipe,
         max_seq_length=args.max_seq_len,
