@@ -8,7 +8,7 @@ The model ships only in bf16 (62.5 GB), so there are **two phases**:
 
 1. **Quantize** — one-time job (~1 GPU-hour) on **any recent NVIDIA GPU**
    (H100/H200 cheapest; Blackwell not required to *pack* FP4): bf16 → **NVFP4**
-   (W4A4, group 16, ~18 GB), pushed to a private HF repo. (`quantize/`)
+   (W4A4, group 16, ~23 GB), pushed to a **public** HF repo. (`quantize/`)
 2. **Serve** — RunPod Serverless load-balancer worker running vLLM, tuned for
    single-stream decode. (`serve/`)
 
@@ -16,11 +16,11 @@ The model ships only in bf16 (62.5 GB), so there are **two phases**:
 
 | Lever | Choice | Why it wins on B200 |
 |---|---|---|
-| Weights | **NVFP4** W4A4, group 16 | Native Blackwell FP4 tensor cores; 62.5 → ~18 GB. Weight bandwidth dominates single-stream decode → ~3–4× vs bf16. |
+| Weights | **NVFP4** W4A4, group 16 | Native Blackwell FP4 tensor cores; 62.5 → ~23 GB. Weight bandwidth dominates single-stream decode → ~3–4× vs bf16. |
 | Spec decode | **EAGLE3** (`RedHatAI/gemma-4-31B-it-speculator.eagle3`) | Purpose-built draft for the exact base model; verifies ~3 tokens/step. The #1 single-stream multiplier (2–3×). |
 | KV cache | **FP8** | Halves KV read bandwidth per decode step. |
 | Attention | **FlashInfer** | vLLM's Blackwell default; best decode kernels. |
-| Parallelism | **TP1 (single GPU)** | 18 GB fits 180 GB with room to spare; TP would only add cross-GPU comm latency. |
+| Parallelism | **TP1 (single GPU)** | 23 GB fits 180 GB with room to spare; TP would only add cross-GPU comm latency. |
 | Modality | **text-only** (`image=0,audio=0`) | Skips vision/audio profiling + KV budget. Vision tower stays bf16 (unquantized) in the checkpoint for optional multimodal serving. |
 | Batching | **max-num-seqs 1** + CUDA graphs | Captures the tight batch-1 decode path; async scheduling overlaps CPU scheduling with GPU decode. |
 

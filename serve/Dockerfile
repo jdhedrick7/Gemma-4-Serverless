@@ -1,12 +1,13 @@
 # Gemma-4-31B-v2 NVFP4 — RunPod Serverless (Load Balancing) worker.
 # Target: 1x NVIDIA B200 (Blackwell, sm_100). Max single-stream decode tok/s.
 #
-# Base: vLLM's official Gemma 4 image (CUDA 12.9, transformers 5.5.3, native
-# Gemma4ForConditionalGeneration + NVFP4 compressed-tensors + EAGLE3 spec-decode
-# + FlashInfer Blackwell attention). Use :gemma4-cu130 for CUDA 13.0 hosts.
-FROM vllm/vllm-openai:gemma4
+# Base: pinned vLLM v0.24.0 (latest stable, CUDA 12.8 / torch 2.11.0 /
+# transformers>=5.5.3). Verified to ship: gemma4_mm (Gemma4ForConditionalGeneration),
+# NVFP4 compressed-tensors, EAGLE3 "speculators" spec-decode, --async-scheduling
+# (with the Eagle-method exemption), and FlashInfer Blackwell attention.
+FROM vllm/vllm-openai:v0.24.0
 
-# hf_transfer gives multi-GB/s pulls for the ~18 GB NVFP4 checkpoint + eagle head.
+# hf_transfer gives multi-GB/s pulls for the ~23 GB NVFP4 checkpoint + 4.5 GB eagle head.
 RUN pip install --no-cache-dir "hf_transfer>=0.1.8"
 
 # HF_HOME points at the RunPod mount used by both the "cached models" feature

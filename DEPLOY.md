@@ -40,7 +40,7 @@ Pods → **Deploy** →
 | Template | `vllm/vllm-openai:gemma4` | torch + CUDA 12.9 + transformers 5.5.3. Any recent CUDA image works. |
 | Container disk | 30 GB | Scratch (pip, compile); weights are on the volume. |
 
-> Disk math: 67 GB already staged (model 62.5 + eagle 4.5) + NVFP4 output ~18 GB ≈ 85 GB of 200 GB. ✓
+> Disk math: 67 GB already staged (model 62.5 + eagle 4.5) + NVFP4 output ~23 GB ≈ 90 GB of 200 GB. ✓
 > On a **non-Blackwell** quant pod (H100/H200), the script's end-of-run sanity
 > generation uses vLLM's Marlin FP4 fallback — confirms the checkpoint is
 > coherent but its speed is meaningless. On a **Blackwell** quant pod (PRO 6000 /
@@ -62,7 +62,7 @@ llm-compressor git main, runs NVFP4 oneshot → `/workspace/gemma-4-31B-v2-NVFP4
 then pushes to `DST_MODEL` (private).
 
 Because the volume is pre-staged, the model + dataset resolve from
-`/workspace/hf-cache` with **no download** — only the ~18 GB NVFP4 output is
+`/workspace/hf-cache` with **no download** — only the ~23 GB NVFP4 output is
 written. (Optionally `export HF_HUB_OFFLINE=1` to force fully offline resolution.)
 
 Watch for: `oneshot done`, a coherent `SANITY GENERATION`, `push complete`.
@@ -78,7 +78,7 @@ needs it again.
 ### B1. Get weights on the host (pick one)
 | Option | How | Notes |
 |---|---|---|
-| **Cached models** ✅ | Endpoint **Model** field = `jdfelo/gemma-4-31B-v2-NVFP4` | RunPod prefetches to `/runpod-volume/huggingface-cache`, $0 download billing. Needs `HF_TOKEN` (private repo). |
+| **Cached models** ✅ | Endpoint **Model** field = `jdfelo/gemma-4-31B-v2-NVFP4` | RunPod prefetches to `/runpod-volume/huggingface-cache`, $0 download billing. **Public repo — no `HF_TOKEN` needed.** |
 | Network volume | Attach `ayzcrd0zx1`; set `MODEL_NAME=/runpod-volume/gemma-4-31B-v2-NVFP4` | Serve straight off the volume you quantized onto (no HF round-trip). Pins to EUR-IS-1. |
 
 ### B2. New Endpoint → Import Git Repository
@@ -95,7 +95,7 @@ Serverless → **New Endpoint** → **Import Git Repository** →
 |---|---|---|
 | Endpoint type | **Load balancer** | Direct HTTP to vLLM, native streaming, max tok/s. |
 | GPU | **B200 (180 GB)** | Native FP4 tensor cores — required for NVFP4 speed. |
-| **GPUs / worker** | **1** | 18 GB NVFP4 + KV fits one B200; TP adds only latency. |
+| **GPUs / worker** | **1** | 23 GB NVFP4 + KV fits one B200; TP adds only latency. |
 | Region | **EUR-IS-1** if serving off the network volume | Cached-models path is region-flexible. |
 | Container disk | 20 GB | Scratch (CUDA-graph cache); weights live on `/runpod-volume`. |
 
@@ -113,7 +113,7 @@ miss them and it probes port 80, finds nothing, 502s after ~8 min):
 ```
 PORT               = 8000
 PORT_HEALTH        = 8080
-HF_TOKEN           = hf_...          # private NVFP4 repo (cached-models path)
+# HF_TOKEN         = (not needed — NVFP4 repo is public; set only if serving a private repo)
 RUNPOD_INIT_TIMEOUT= 800             # NVFP4 load + EAGLE3 draft fetch < cutoff
 ```
 

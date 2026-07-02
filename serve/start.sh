@@ -3,7 +3,7 @@
 # tuned for MAX SINGLE-STREAM DECODE tok/s on 1x B200 (Blackwell, sm_100).
 #
 # Throughput stack (all defaults below):
-#   * NVFP4 W4A4 weights        -> native B200 FP4 tensor cores (~18 GB, TP1)
+#   * NVFP4 W4A4 weights        -> native B200 FP4 tensor cores (~23 GB, TP1)
 #   * EAGLE3 speculative decode  -> RedHatAI draft head, the #1 single-stream lever
 #   * FP8 KV cache               -> halves KV bandwidth on Blackwell
 #   * FlashInfer attention       -> vLLM default on Blackwell (forced explicit)
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # ---- Model ---------------------------------------------------------------
-# Default to the private NVFP4 repo; override to a local /runpod-volume path
+# Default to the public NVFP4 repo; override to a local /runpod-volume path
 # or the bf16 source for A/B. SERVED_MODEL_NAME is the id clients call.
 MODEL_NAME="${MODEL_NAME:-jdfelo/gemma-4-31B-v2-NVFP4}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${MODEL_NAME}}"
@@ -24,7 +24,7 @@ SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${MODEL_NAME}}"
 PORT="${PORT:-8000}"
 PORT_HEALTH="${PORT_HEALTH:-8080}"
 
-# ---- Single-GPU: no tensor parallel (18 GB NVFP4 fits 180 GB B200) --------
+# ---- Single-GPU: no tensor parallel (23 GB NVFP4 fits 180 GB B200) --------
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 
 # ---- PROFILE: one switch picks the whole tuning set ----------------------
