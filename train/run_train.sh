@@ -37,6 +37,9 @@ done
 . /workspace/sfvenv/bin/activate
 cd "$SF"
 export HF_HOME=/workspace/.huggingface
+# cross_entropy over full 262144 vocab OOM'd at bs8; expandable_segments cuts
+# fragmentation, bs2+accum4 keeps effective batch 8 within 178 GB.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # venv python explicitly: `torchrun` resolves to system Python where SpecForge
 # (installed --no-deps into the venv) is invisible -> ModuleNotFoundError.
@@ -49,8 +52,8 @@ export HF_HOME=/workspace/.huggingface
   --chat-template gemma4 \
   --attention-backend sdpa \
   --block-size 8 \
-  --batch-size 8 \
-  --accumulation-steps 1 \
+  --batch-size 2 \
+  --accumulation-steps 4 \
   --num-epochs 1 \
   --learning-rate 2e-4 \
   --warmup-ratio 0.02 \
