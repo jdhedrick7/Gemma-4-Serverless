@@ -123,7 +123,7 @@ def main() -> None:
                 f.write(
                     json.dumps(
                         {
-                            "messages": [
+                            "conversations": [
                                 {"role": "user", "content": p},
                                 {"role": "assistant", "content": resp},
                             ]
