@@ -14,6 +14,7 @@ for p in $(pgrep -f "gen_data.py|run_train.sh"); do
   [ -n "$pgid" ] && kill -9 -- "-$pgid" 2>/dev/null || true
 done
 pkill -9 -f "multiprocessing.spawn" 2>/dev/null || true
+pkill -9 -f "VLLM::EngineCore" 2>/dev/null || true   # offline LLM() engine proctitle (no "vllm"/"spawn" substring)
 pkill -9 -f "gen_data.py" 2>/dev/null || true
 
 # wait for VRAM to free (up to ~2 min)
