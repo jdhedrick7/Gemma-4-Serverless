@@ -73,7 +73,7 @@ run_cfg () {
     grep -iE "Capturing|CUDA graph|cudagraph|enforce_eager" "$log" | tail -1
     grep -iE "kv.?cache.*(fp8|dtype)|GPU KV cache size|Maximum concurrency" "$log" | tail -2
     echo "----------------------------"
-    python3 "$BENCH" --base-url "$BASE" --trials "$TRIALS" --max-tokens "$MAXTOK" --warmup 3 2>&1 | tee "$res"
+    python3 "$BENCH" --base-url "$BASE" --api-key "${VLLM_API_KEY:-EMPTY}" --trials "$TRIALS" --max-tokens "$MAXTOK" --warmup 3 2>&1 | tee "$res"
   else
     echo "[!] $label never became ready — skipped (see $log)" | tee "$res"
   fi
