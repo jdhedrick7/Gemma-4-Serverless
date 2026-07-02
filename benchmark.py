@@ -119,6 +119,8 @@ async def fetch_accept_rate(client, base_url, headers):
             if len(parts) < 2:
                 continue
             name = parts[0].split("{")[0]
+            if name.endswith("_created"):   # prometheus_client unix-timestamp samples
+                continue
             val = float(parts[-1])
             if name in ("vllm:spec_decode_num_drafts_total", "vllm:spec_decode_num_drafts"):
                 drafts = (drafts or 0.0) + val

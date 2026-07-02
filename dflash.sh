@@ -144,7 +144,10 @@ if [ "${SKIP_CONTROL:-0}" != 1 ]; then
   rung e5_nightly --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPEC 5)"
 fi
 rung d8         --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 8)"
-rung d16        --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 16)"
+# k=16 needs headroom: default max_num_seqs(1024) x (k+1) blows the 8192-token
+# scheduling budget (observed: max_num_scheduled_tokens=-7168). Single-stream
+# doesn't need >32 seqs.
+rung d16        --max-num-seqs 32 --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 16)"
 
 # ---- winner + autotuned peak ----------------------------------------------------
 mean_of () { awk '/decode tok\/s :/ {for(i=1;i<=NF;i++) if($i=="mean"){print $(i+1); exit}}' "$1" 2>/dev/null; }
