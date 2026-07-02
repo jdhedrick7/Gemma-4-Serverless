@@ -143,11 +143,19 @@ flags_of () {
 if [ "${SKIP_CONTROL:-0}" != 1 ]; then
   rung e5_nightly --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPEC 5)"
 fi
-rung d8         --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 8)"
+# Rung gates: SKIP_D8=1 skips the already-measured d8; RUN_D4=1 adds a shallow
+# block probe (accepted/draft was ~2.1 of 8 -> most drafts wasted; d4 tests
+# whether a shorter block wins on verify-cost).
+if [ "${SKIP_D8:-0}" != 1 ]; then
+  rung d8 --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 8)"
+fi
+if [ "${RUN_D4:-0}" = 1 ]; then
+  rung d4 --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 4)"
+fi
 # k=16 needs headroom: default max_num_seqs(1024) x (k+1) blows the 8192-token
 # scheduling budget (observed: max_num_scheduled_tokens=-7168). Single-stream
 # doesn't need >32 seqs.
-rung d16        --max-num-seqs 32 --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 16)"
+rung d16 --max-num-seqs 32 --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 16)"
 
 # ---- winner + autotuned peak ----------------------------------------------------
 mean_of () { awk '/decode tok\/s :/ {for(i=1;i<=NF;i++) if($i=="mean"){print $(i+1); exit}}' "$1" 2>/dev/null; }
