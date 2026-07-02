@@ -10,7 +10,17 @@
 #   DRAFT=RedHatAI/gemma-4-31B-it-speculator.dflash bash train/trtllm_serve.sh  # stock
 set -uo pipefail
 
-TARGET="${TARGET:-/workspace/gemma4_v2_text}"          # bf16 target (sidesteps NVFP4 loader #12764)
+# --- MPI env (VALIDATED live on rc20): SSH sessions bypass nvidia_entrypoint.sh,
+# so OpenMPI can't find its runtime files -> `import tensorrt_llm` aborts at
+# opal_init. OPAL_PREFIX relocates it; run-as-root vars needed (we're root).
+export OPAL_PREFIX="${OPAL_PREFIX:-/opt/hpcx/ompi}"
+export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+
+# TARGET: NVFP4 loader bug (#12764) is FIXED on rc20 (built from recent main), so
+# the NVFP4 text-only extraction is the throughput target (~18GB, ~3.4x less HBM
+# read than bf16 -> higher single-stream floor). Both bf16 and NVFP4 targets must
+# be TEXT-ONLY (Gemma4ForCausalLM); the HF NVFP4 repo is multimodal, so extract.
+TARGET="${TARGET:-/workspace/gemma4_v2_nvfp4_text}"    # text-only NVFP4 (see extract_text_nvfp4.py)
 DRAFT="${DRAFT:-/workspace/dflash_ft_vllm}"
 KDRAFT="${KDRAFT:-8}"                                   # max_draft_len (block_size)
 PORT="${PORT:-8000}"
@@ -22,13 +32,18 @@ echo "trtllm: $(python3 -c 'import tensorrt_llm; print(tensorrt_llm.__version__)
 # 1) wire Gemma4 aux-capture (idempotent; no-op if already patched or upstream added it)
 python3 "$(dirname "$0")/patch_trtllm_gemma4.py" || { echo "[x] patch failed"; exit 1; }
 
-# 2) DFlash spec config — target_layer_ids from the head's aux_hidden_state_layer_ids
+# 2) DFlash spec config. VALIDATED live: DFLASH sends K+1 tokens/step but
+# FlashInfer's decode path expects 1 token/seq, and Gemma4's head_dim=256
+# auto-selects FlashInfer -> must force attn_backend: TRTLLM. mask_token_id
+# from head config (4); target_layer_ids = head's aux_hidden_state_layer_ids.
 cat > "$CFG" <<YAML
+attn_backend: TRTLLM
 speculative_config:
   decoding_type: DFlash
   max_draft_len: ${KDRAFT}
   speculative_model: ${DRAFT}
   target_layer_ids: [1, 17, 29, 47, 58]
+  mask_token_id: 4
 YAML
 echo "[cfg] $CFG:"; cat "$CFG"
 
@@ -43,7 +58,7 @@ done
 echo "[serve] target=$TARGET draft=$DRAFT k=$KDRAFT port=$PORT"
 setsid trtllm-serve serve "$TARGET" \
   --backend pytorch --host 0.0.0.0 --port "$PORT" \
-  --max_batch_size 1 --max_seq_len 4096 \
+  --max_batch_size 1 --max_seq_len 4096 --trust_remote_code \
   --config "$CFG" > /workspace/trtllm_serve.log 2>&1 &
 echo "[serve] pid=$! log=/workspace/trtllm_serve.log"
 echo "[next] wait for 'Application startup complete' in the log, then:"

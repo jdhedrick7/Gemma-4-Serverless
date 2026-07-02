@@ -335,3 +335,30 @@ transformers==5.5.4 (gemma4 OK), CUDA_ARCH_LIST has 10.0 (sm_100/B200), ships
 trtllm-serve, anonymously pullable. Purpose: validate the untested TRT-LLM
 modeling_gemma4.py patch + serve base RedHat EAGLE3 head IN PARALLEL with
 training. MUST TERMINATE when done (cost). Training pod: vkkadsdhy2w7mg.
+
+## L20 - TRT-LLM path VALIDATED live on 2nd B200 (rc20), + NVFP4 correction
+
+Spun a parallel B200 (nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20) to validate
+the untested TRT-LLM patch while training ran. Findings (all now in trtllm_serve.sh):
+
+1. MPI: SSH sessions bypass nvidia_entrypoint.sh -> `import tensorrt_llm` aborts
+   at opal_init. Fix: export OPAL_PREFIX=/opt/hpcx/ompi + OMPI_ALLOW_RUN_AS_ROOT[_CONFIRM]=1.
+2. patch_trtllm_gemma4.py APPLIED + COMPILED + LOADED clean on the real container
+   (Gemma4ForCausalLM target + DFlash head initialized together, no spec_metadata error).
+3. CONFIG BUG caught (the reason the pod existed): DFLASH sends K+1 tokens/step but
+   FlashInfer decode expects 1 token/seq; Gemma4 head_dim=256 auto-selects FlashInfer.
+   Fix: force `attn_backend: TRTLLM` at YAML top level. Also need mask_token_id: 4
+   and --trust_remote_code (head has custom auto_map config).
+4. Got through weights-load (60GB bf16) before I terminated the pod (was idle-polling).
+
+NVFP4 CORRECTION (user): the NVFP4 loader bug #12764 is FIXED on rc20 (recent main),
+so bf16 was the wrong serve target. NVFP4 target = ~18GB = ~3.4x less HBM read ->
+higher single-stream floor (bf16 ~133 tok/s HW floor -> NVFP4 ~440, before spec).
+jdfelo/gemma-4-31B-v2-NVFP4 already exists on HF (quantized earlier) but is MULTIMODAL
+(Gemma4ForConditionalGeneration+vision). TRT-LLM DFlash needs text-only Gemma4ForCausalLM,
+so wrote train/extract_text_nvfp4.py: safetensors key-filter (keeps NVFP4 packed/scale
+aux tensors bit-exact, unlike the bf16 nn.Module extractor which dequantizes). Filter
+validated against real HF header: keep 2063 (2062 LM + lm_head), drop 356 vision.
+
+Status: validation pod TERMINATED (no leak, 404 confirmed). Training healthy 29%,
+~2.9h out. Endgame serve = NVFP4 text target + finetuned DFlash head on patched rc20.
