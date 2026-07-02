@@ -96,25 +96,46 @@ async def one_request(client, base_url, headers, model, prompt, max_tokens):
 
 
 async def fetch_accept_rate(client, base_url, headers):
-    """Best-effort scrape of EAGLE3 acceptance from vLLM /metrics."""
+    """Scrape EAGLE3 acceptance from vLLM /metrics.
+
+    Returns (mean_accepted_per_draft, per_pos list) or None.
+    v0.24.0 names (exact-match; substring matching would collide with
+    vllm:spec_decode_num_accepted_tokens_per_pos):
+      vllm:spec_decode_num_drafts_total
+      vllm:spec_decode_num_draft_tokens_total
+      vllm:spec_decode_num_accepted_tokens_total
+      vllm:spec_decode_num_accepted_tokens_per_pos_total{position=...}
+    """
     try:
         r = await client.get(f"{base_url}/metrics", headers=headers, timeout=10)
         if r.status_code != 200:
             return None
-        acc = num = draft = None
+        drafts = draft_toks = acc_toks = None
+        per_pos = {}
         for line in r.text.splitlines():
             if line.startswith("#"):
                 continue
-            if "spec_decode_num_accepted_tokens" in line:
-                acc = float(line.split()[-1])
-            elif "spec_decode_num_draft_tokens" in line:
-                draft = float(line.split()[-1])
-            elif "spec_decode_draft_acceptance_rate" in line:
-                num = float(line.split()[-1])
-        if num is not None:
-            return num
-        if acc is not None and draft:
-            return acc / draft
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name = parts[0].split("{")[0]
+            val = float(parts[-1])
+            if name in ("vllm:spec_decode_num_drafts_total", "vllm:spec_decode_num_drafts"):
+                drafts = (drafts or 0.0) + val
+            elif name in ("vllm:spec_decode_num_draft_tokens_total", "vllm:spec_decode_num_draft_tokens"):
+                draft_toks = (draft_toks or 0.0) + val
+            elif name in ("vllm:spec_decode_num_accepted_tokens_total", "vllm:spec_decode_num_accepted_tokens"):
+                acc_toks = (acc_toks or 0.0) + val
+            elif name.startswith("vllm:spec_decode_num_accepted_tokens_per_pos"):
+                pos = parts[0].split('position="')[-1].split('"')[0] if 'position="' in parts[0] else str(len(per_pos))
+                per_pos[pos] = per_pos.get(pos, 0.0) + val
+        if acc_toks is None or not draft_toks:
+            return None
+        rate = acc_toks / draft_toks
+        pos_rates = None
+        if drafts and per_pos:
+            pos_rates = [per_pos[k] / drafts for k in sorted(per_pos, key=lambda x: int(x) if x.isdigit() else 0)]
+        return rate, (acc_toks / drafts if drafts else None), pos_rates
     except Exception:
         return None
     return None
@@ -178,7 +199,11 @@ async def main():
 
         acc = await fetch_accept_rate(client, base, headers)
         if acc is not None:
-            print(f"EAGLE3 accept: {acc:.3f}  (higher = more tok/s; ~0.6-0.8 typical)")
+            rate, per_draft, pos_rates = acc
+            extra = f"  accepted/draft {per_draft:.2f}" if per_draft is not None else ""
+            print(f"EAGLE3 accept: {rate:.3f} of draft tokens{extra}")
+            if pos_rates:
+                print("  accept by pos: " + " ".join(f"p{i}={r:.2f}" for i, r in enumerate(pos_rates)))
         else:
             print("EAGLE3 accept: n/a (metrics not exposed on this endpoint)")
 
