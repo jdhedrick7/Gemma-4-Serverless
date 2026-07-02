@@ -148,3 +148,35 @@ autotune. If short of 1000: Domino (DFlash+GRU, SpecForge), deeper drafter,
 TRT-LLM compare.
 
 ## Scoreboard peak so far: **peak_d8 = 336.5 tok/s mean (525 max), 2.40× baseline.**
+
+## More learnings (data-gen phase)
+
+**I7 — the offline `LLM()` engine proctitle is `VLLM::EngineCore`** — no "vllm"
+or "multiprocessing.spawn" substring, so `pkill -f vllm` AND the serve-era
+`pkill -f "multiprocessing.spawn"` BOTH miss it. It stranded 170 GB across a
+gen restart and OOM'd the relaunch. Reap with `pkill -9 -f "VLLM::EngineCore"`
+(now in restart_gen.sh). Group-kill by PGID also works if you catch the parent.
+
+**L11 — fp8 KV lifted data-gen concurrency 40x→82x but tok/s only ~4.5k→~4.9k.**
+Batch offline generation is NOT the clean decode-bound case: it's dominated by
+prefill of the prompt queue + per-`generate()`-chunk tail drain (batch shrinks
+137→1 as seqs finish). The concurrency ceiling wasn't the binding constraint,
+so doubling it barely helped. Lesson: fp8 KV is a *serving/long-context* win,
+not a batch-gen win. (Serving single-stream: L2 says it's a regression there
+too — fp8 KV only pays at high concurrency + long context.)
+
+**Decision — cap training data at 50K (not 120K).** Warm-start alignment
+finetune from the RedHat head doesn't need 120K; 50K starts training ~2.5 h
+sooner. `cap_gen.sh` watches row count, group-kills gen at 50K, writes the
+DONE marker the train waiter blocks on.
+
+**Re-benchmark is pre-wired:** `dflash.sh` takes `DFLASH=<path>`, so post-export
+it's `DFLASH=/workspace/dflash_ft_vllm SKIP_CONTROL=1 bash dflash.sh`.
+
+## Ceiling math (why 1000 is plausible)
+Decode reads ~19 GB active weights ⇒ ~2.4 ms/pass @ 8 TB/s ⇒ ~420 tok/s
+unspeculated. DFlash: 1 draft pass (~0.6 ms, whole 8-block) + 1 verify
+(~2.4 ms) = ~3 ms/cycle producing (accepted+1) tokens. At today's 3.11
+acc/pass ⇒ ~336 measured. Finetuned head at ~5-6 acc ⇒ ~1.6-2× ⇒ ~550-670;
+with k16 + autotune + Domino stacking, ~1000 is reachable but hinges on
+accepted/draft climbing from 2.11/8 toward ~5-6/8.
