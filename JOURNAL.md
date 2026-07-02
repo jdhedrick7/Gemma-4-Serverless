@@ -180,3 +180,24 @@ unspeculated. DFlash: 1 draft pass (~0.6 ms, whole 8-block) + 1 verify
 acc/pass ⇒ ~336 measured. Finetuned head at ~5-6 acc ⇒ ~1.6-2× ⇒ ~550-670;
 with k16 + autotune + Domino stacking, ~1000 is reachable but hinges on
 accepted/draft climbing from 2.11/8 toward ~5-6/8.
+
+## L12 — Gemma-4 changed its chat format; SpecForge's `gemma` template is WRONG for it
+
+**Highest-value catch of the session.** SpecForge ships a `gemma` chat template
+using `<start_of_turn>…<end_of_turn>` (Gemma-2/3). **Gemma-4 changed to**
+`<bos><|turn>user\n…<turn|>\n<|turn>model\n…<turn|>\n` (verified live against the
+v2 tokenizer). SpecForge's DFlash loss mask locates assistant spans by string:
+`end_of_turn_token + assistant_header`. With the wrong template that regex
+matches **nothing** → every training sample has an all-zero loss mask → either
+filtered by `min_loss_tokens` or trained on noise. Would have burned the whole
+~5 h finetune producing a useless head, silently (no crash).
+Fix: `train/register_gemma4.py` registers a `gemma4` template
+(`assistant_header="<|turn>model\n"`, `user_header="<|turn>user\n"`,
+`end_of_turn_token="<turn|>\n"`, `system_prompt=""`); `run_train.sh` uses
+`--chat-template gemma4`. (Inline heredoc registration mangled the `\n` escapes —
+use a real .py file, never a shell heredoc, for code with escapes.)
+
+**Meta-lesson:** dry-run/smoke tests validated *construction + warm-start* but
+NOT the *data path*. The template mismatch lived in the one stage the smoke test
+didn't cover. De-risking the data path before the long run (rendering one sample
+through the real tokenizer) is what caught it.
