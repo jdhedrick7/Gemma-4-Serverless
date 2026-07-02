@@ -15,10 +15,11 @@ Only the language-model Linears are quantized, so TEXT calibration is correct an
 sufficient (identical approach to the official NVFP4 llama3 example). 512 samples
 @ 2048 tokens run through THIS model's own chat template.
 
-Requires (installed by run_pod.sh):
-  transformers==5.8.1   (Gemma4 needs transformers>=5.5; 5.8.1 is the llm-compressor pin)
-  llm-compressor @ git main   (PyPI 0.10.0.1 can't load Gemma4)
-  compressed-tensors, datasets, accelerate, huggingface_hub, hf_transfer
+Requires (installed by run_pod.sh, PINNED — install torch FIRST, then the rest):
+  torch==2.11.0+cu128   (highest cu128 wheel; inside llmcompressor 0.12.0's [2.10,2.12])
+  llmcompressor==0.12.0 (first release consistent for Gemma4; avoids main's torch churn)
+  transformers==5.10.1  (0.12.0's ceiling; loads Gemma4) + compressed-tensors==0.17.1 (auto)
+  NO torchvision (not a runtime dep; text-only calibration never needs it)
 
 Usage:
   python quantize_nvfp4.py \
@@ -47,13 +48,14 @@ from llmcompressor import oneshot
 from llmcompressor.modifiers.quantization import QuantizationModifier
 
 
-# Language model stays; everything multimodal is preserved at bf16.
-# Mirrors RedHatAI/gemma-4-31B-it-NVFP4's effective ignore set.
+# Language-model Linears are quantized; the whole vision+audio+embed stack and the
+# tied lm_head stay bf16. Exact ignore set from RedHatAI/gemma-4-31B-it-NVFP4 — the
+# NVFP4 checkpoint that shipped for this exact base model.
 IGNORE = [
+    "re:.*vision.*",
+    "re:.*audio.*",
     "lm_head",
-    "re:.*vision_tower.*",
-    "re:.*multi_modal_projector.*",
-    "re:.*embed_vision.*",
+    "re:.*embed.*",
 ]
 
 
@@ -148,16 +150,32 @@ def main() -> int:
         except Exception as e:  # sanity gen is best-effort; never fail the run on it
             print(f"[quant] sanity gen skipped: {e!r}", flush=True)
 
-    # Save compressed. Also save the PROCESSOR so multimodal + chat template survive.
+    # Save compressed model + tokenizer.
     os.makedirs(args.dst_dir, exist_ok=True)
     print(f"[quant] saving compressed checkpoint -> {args.dst_dir}", flush=True)
     model.save_pretrained(args.dst_dir, save_compressed=True)
     tokenizer.save_pretrained(args.dst_dir)
+
+    # Preserve serving-critical files (processor + chat template) for vLLM. AutoProcessor
+    # may require torchvision (absent in this text-only env), so also copy the raw files
+    # from the staged source snapshot as the robust fallback.
     try:
         AutoProcessor.from_pretrained(args.src).save_pretrained(args.dst_dir)
-        print("[quant] saved processor (vision preprocessing + chat template)", flush=True)
+        print("[quant] saved processor via AutoProcessor", flush=True)
     except Exception as e:
-        print(f"[quant] processor save skipped: {e!r}", flush=True)
+        print(f"[quant] AutoProcessor skipped ({e!r}); copying raw files", flush=True)
+    try:
+        import shutil
+        from huggingface_hub import snapshot_download
+        src_dir = snapshot_download(args.src, local_files_only=True)
+        for fn in ("chat_template.jinja", "processor_config.json",
+                   "preprocessor_config.json", "generation_config.json",
+                   "special_tokens_map.json"):
+            s, d = os.path.join(src_dir, fn), os.path.join(args.dst_dir, fn)
+            if os.path.exists(s) and not os.path.exists(d):
+                shutil.copy2(s, d); print(f"[quant] copied {fn} from source", flush=True)
+    except Exception as e:
+        print(f"[quant] source config copy skipped: {e!r}", flush=True)
 
     if args.push_repo:
         from huggingface_hub import HfApi

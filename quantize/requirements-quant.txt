@@ -1,10 +1,20 @@
-# NVFP4 quantization deps for the B200 pod.
-# Gemma4 needs transformers>=5.5; 5.8.1 is the llm-compressor Gemma4 pin.
-transformers==5.8.1
-# PyPI llmcompressor (0.10.0.1) can't load Gemma4 — install from git main.
-llmcompressor @ git+https://github.com/vllm-project/llm-compressor.git@main
-compressed-tensors
-datasets
+# PINNED, churn-free toolchain for Gemma4 NVFP4 quantization.
+# Verified against PyPI wheel metadata + the PyTorch cu128 index.
+#
+# INSTALL ORDER MATTERS (run_pod.sh does this):
+#   1) torch==2.11.0+cu128  from  https://download.pytorch.org/whl/cu128   (NOT in this file)
+#   2) then this file — these MUST NOT bump torch.
+#
+# Why pinned: installing llmcompressor@main uses BUILD_TYPE=dev -> unbounded torch>=2.10.0,
+# so pip grabbed torch 2.12.1+cu130 and orphaned the base image's cu128 torchvision
+# (the "operator torchvision::nms does not exist" ABI break). llmcompressor 0.12.0 caps
+# torch<=2.12.0 and transformers 5.9-5.10.1, so a release pin eliminates the churn.
+#
+# NO torchvision: not a runtime dep (dev-extra only); text-only calibration never needs it.
+llmcompressor==0.12.0
+transformers==5.10.1
+compressed-tensors==0.17.1
 accelerate
-huggingface_hub[cli]
+datasets
+huggingface_hub
 hf_transfer

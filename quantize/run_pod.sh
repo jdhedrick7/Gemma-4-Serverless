@@ -1,67 +1,78 @@
 #!/usr/bin/env bash
 #
-# One-shot bootstrap for the B200 quantization pod.
+# GPU quant bootstrap for a CLEAN base image:
+#   nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04   (no torch/torchvision preinstalled)
+#
+# Why a clean CUDA base: RunPod's runpod/pytorch images bundle torchvision pinned to
+# torch, so any torch change orphans it (the nms ABI break). A clean base has nothing
+# to orphan, and cu128 matches our pinned torch 2.11.0+cu128 (Blackwell-ready).
 #
 # Prereqs on the pod:
-#   * 1x B200 (180 GB), attached network volume mounted at /workspace
-#   * base image vllm/vllm-openai:gemma4 (torch + CUDA 12.9 + transformers 5.5.3)
-#   * env: HF_TOKEN (required, to read the private source + push the quant)
-#
-# What it does:
-#   1. Pins HF cache onto the network volume (persists across pod restarts).
-#   2. Installs the quant toolchain (transformers 5.8.1 + llm-compressor git main).
-#   3. Runs NVFP4 quantization -> /workspace/gemma-4-31B-v2-NVFP4.
-#   4. Optionally pushes to a private HF repo (DST_MODEL) for clean serving.
+#   * 1x Blackwell GPU (RTX PRO 6000 or B200), EUR-IS-1 (to attach the staged volume)
+#   * network volume ayzcrd0zx1 mounted at /workspace, PRE-STAGED with:
+#       - HF cache (bf16 model + eagle head + dataset) at /workspace/hf-cache
+#       - warm pip wheel cache at /workspace/pip-cache  (makes this install fast)
+#   * env: HF_TOKEN (read private source + push quantized repo)
 #
 # Usage on the pod:
-#   export HF_TOKEN=hf_...              # required
-#   export DST_MODEL=jdfelo/gemma-4-31B-v2-NVFP4   # optional: push target
+#   export HF_TOKEN=hf_...
+#   export DST_MODEL=jdfelo/gemma-4-31B-v2-NVFP4     # optional push target
 #   bash run_pod.sh
 #
 set -euo pipefail
-
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 VOLUME="${VOLUME:-/workspace}"
+export HF_HOME="${HF_HOME:-${VOLUME}/hf-cache}"              # pre-staged model+dataset (no download)
+export PIP_CACHE_DIR="${PIP_CACHE_DIR:-${VOLUME}/pip-cache}" # warm wheel cache (fast install)
+export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
+export PIP_BREAK_SYSTEM_PACKAGES=1
+
 SRC_MODEL="${SRC_MODEL:-jdfelo/gemma-4-31B-v2}"
 DST_DIR="${DST_DIR:-${VOLUME}/gemma-4-31B-v2-NVFP4}"
-DST_MODEL="${DST_MODEL:-}"                 # empty = don't push
-NUM_CALIBRATION_SAMPLES="${NUM_CALIBRATION_SAMPLES:-512}"
-MAX_SEQUENCE_LENGTH="${MAX_SEQUENCE_LENGTH:-2048}"
+DST_MODEL="${DST_MODEL:-}"                                    # empty = don't push
+TORCH_PIN="${TORCH_PIN:-torch==2.11.0+cu128}"
+TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu128}"
 
-: "${HF_TOKEN:?set HF_TOKEN (needs read on the private source repo + write to push)}"
+: "${HF_TOKEN:?set HF_TOKEN (read private source + push)}"
+export HF_TOKEN
 
-# ---- HF cache on the volume (persist downloads, count against the 200 GB) ----
-export HF_HOME="${HF_HOME:-${VOLUME}/hf-cache}"
-export HF_HUB_ENABLE_HF_TRANSFER=1
-mkdir -p "${HF_HOME}"
-echo "[run_pod] HF_HOME=${HF_HOME}"
-echo "[run_pod] source=${SRC_MODEL}  dst_dir=${DST_DIR}  push=${DST_MODEL:-<none>}"
+echo "[gpu] HF_HOME=${HF_HOME}  PIP_CACHE_DIR=${PIP_CACHE_DIR}"
 
-# ---- free space guard: need ~90 GB (src 62.5 + nvfp4 ~18 + cache) ------------
-avail_gb="$(df -BG --output=avail "${VOLUME}" 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)"
-echo "[run_pod] volume free: ${avail_gb} GB"
-if [ "${avail_gb:-0}" -lt 90 ]; then
-    echo "[run_pod] WARNING: <90 GB free on ${VOLUME}; quant may fail to stage weights." >&2
+# ---- 1. System Python (clean CUDA base ships none) --------------------------
+if ! command -v python3.12 >/dev/null 2>&1; then
+    echo "[gpu] installing python3.12 + pip + git"
+    apt-get update -q
+    apt-get install -y -q python3.12 python3.12-venv python3-pip git >/dev/null
 fi
+PY=python3.12
+$PY -m pip install -q -U pip >/dev/null 2>&1 || true
 
-# ---- toolchain --------------------------------------------------------------
-echo "[run_pod] installing quant toolchain…"
-pip install --no-cache-dir -r "${HERE}/requirements-quant.txt"
+# ---- 2. Install toolchain to LOCAL disk, wheels from the warm cache ---------
+# torch FIRST from the cu128 index (pinned build) so pip never re-resolves it.
+echo "[gpu] installing ${TORCH_PIN} (cache-warm -> fast)"
+$PY -m pip install -q "${TORCH_PIN}" --index-url "${TORCH_INDEX}"
+echo "[gpu] installing pinned llmcompressor stack (must NOT bump torch)"
+$PY -m pip install -q -r "${HERE}/requirements-quant.txt"
 
-# ---- run --------------------------------------------------------------------
-echo "[run_pod] starting NVFP4 quantization…"
-PUSH_ARGS=()
-[ -n "${DST_MODEL}" ] && PUSH_ARGS+=(--push-repo "${DST_MODEL}")
+# ---- 3. Verify the pins held (the two things that broke before) -------------
+$PY - <<'PY'
+import torch, transformers, llmcompressor
+assert torch.__version__.startswith("2.11.0"), f"torch bumped: {torch.__version__}"
+print(f"[gpu] torch {torch.__version__} | transformers {transformers.__version__} | llmcompressor {llmcompressor.__version__}")
+try:
+    import torchvision
+    print(f"[gpu] WARNING torchvision present ({torchvision.__version__}) — should be absent")
+except Exception:
+    print("[gpu] torchvision absent (correct)")
+from transformers import Gemma4ForConditionalGeneration  # must import without torchvision
+print("[gpu] Gemma4ForConditionalGeneration import OK")
+PY
 
-python3 "${HERE}/quantize_nvfp4.py" \
-    --src "${SRC_MODEL}" \
-    --dst-dir "${DST_DIR}" \
-    --calib-dataset "${CALIB_DATASET:-HuggingFaceH4/ultrachat_200k}" \
-    --num-samples "${NUM_CALIBRATION_SAMPLES}" \
-    --max-seq-len "${MAX_SEQUENCE_LENGTH}" \
-    "${PUSH_ARGS[@]}"
+# ---- 4. Quantize (reads staged bf16 from HF_HOME; writes NVFP4 to DST_DIR) --
+PUSH=(); [ -n "${DST_MODEL}" ] && PUSH=(--push-repo "${DST_MODEL}")
+echo "[gpu] launching NVFP4 quantization"
+$PY "${HERE}/quantize_nvfp4.py" --src "${SRC_MODEL}" --dst-dir "${DST_DIR}" "${PUSH[@]}"
 
-echo "[run_pod] DONE. NVFP4 checkpoint at: ${DST_DIR}"
+echo "[gpu] DONE. NVFP4 checkpoint at: ${DST_DIR}"
 du -sh "${DST_DIR}" 2>/dev/null || true
-echo "[run_pod] next: serve it (see ../serve) — set MODEL to ${DST_MODEL:-${DST_DIR}}"
