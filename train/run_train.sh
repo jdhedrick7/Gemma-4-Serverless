@@ -47,12 +47,12 @@ torchrun --nproc_per_node=1 --master_port 29571 scripts/train_dflash.py \
   --chat-template gemma \
   --attention-backend sdpa \
   --block-size 8 \
-  --batch-size 4 \
-  --accumulation-steps 2 \
-  --num-epochs 2 \
+  --batch-size 8 \
+  --accumulation-steps 1 \
+  --num-epochs 1 \
   --learning-rate 2e-4 \
   --warmup-ratio 0.02 \
-  --max-length 3072 \
+  --max-length 2048 \
   --log-interval 20 \
   --save-interval 2000 \
   --report-to none \
