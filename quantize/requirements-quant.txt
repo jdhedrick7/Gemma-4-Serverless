@@ -1,0 +1,10 @@
+# NVFP4 quantization deps for the B200 pod.
+# Gemma4 needs transformers>=5.5; 5.8.1 is the llm-compressor Gemma4 pin.
+transformers==5.8.1
+# PyPI llmcompressor (0.10.0.1) can't load Gemma4 — install from git main.
+llmcompressor @ git+https://github.com/vllm-project/llm-compressor.git@main
+compressed-tensors
+datasets
+accelerate
+huggingface_hub[cli]
+hf_transfer
