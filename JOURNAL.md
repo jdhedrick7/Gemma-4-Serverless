@@ -325,3 +325,13 @@ on GPU (export is CPU-only, zero contention). Result: `export_head.py` overwrote
 `draft_model.` prefix, single unsharded file, no domino modules). The whole
 downstream chain (export → dflash.sh DFLASH=path) is now proven on real
 artifacts. Final checkpoint export will be a known-good one-liner.
+
+## L19 - parallel TRT-LLM validation pod (user-authorized 2nd B200)
+
+Pod `j5orkuylapq83x` (gemma4-trtllm-validate), NVIDIA B200, US-CA-2, $5.89/hr,
+attached to volume `5vd1uvstkm` (same as training pod, read-only use).
+Image `nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20` (commit c25c23f):
+transformers==5.5.4 (gemma4 OK), CUDA_ARCH_LIST has 10.0 (sm_100/B200), ships
+trtllm-serve, anonymously pullable. Purpose: validate the untested TRT-LLM
+modeling_gemma4.py patch + serve base RedHat EAGLE3 head IN PARALLEL with
+training. MUST TERMINATE when done (cost). Training pod: vkkadsdhy2w7mg.
