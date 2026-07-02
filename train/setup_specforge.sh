@@ -31,7 +31,7 @@ from pathlib import Path
 p = Path("specforge/args.py")
 s = p.read_text()
 old = "from sglang.srt.server_args import ATTENTION_BACKEND_CHOICES"
-if old in s:
+if old in s and "except ImportError" not in s:
     s = s.replace(old, (
         "try:\n"
         "    from sglang.srt.server_args import ATTENTION_BACKEND_CHOICES\n"
