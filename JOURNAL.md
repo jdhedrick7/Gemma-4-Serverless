@@ -288,3 +288,29 @@ vLLM-internal overhead lever is now exhausted with proof. => the finetuned head
 lifts *acceptance* (→ ~500-700), but breaking past that to 1000 REQUIRES the
 lower-overhead in-engine loop = TRT-LLM (L15, staged in TRT_LLM_PLAN.md +
 patch_trtllm_gemma4.py + trtllm_serve.sh). TRT-LLM is now necessary, not optional.
+
+## L17 — DFlash head finetune is LIVE (3 live-run bugs fixed, none caught by smoke tests)
+
+Training running on the B200: loss 4.3→1.8, draft acc 0.32→0.58 in the first
+~180 steps, GPU 99%, VRAM 141/178 GB. gemma4 target-forward + gemma4 loss-mask
++ warm-started RedHat head all validated by actually running.
+
+Three bugs, each only surfaced live (smoke tests covered construction/warm-start,
+not the runtime data path):
+1. **`torchrun` runs system Python** — SpecForge installed `--no-deps` into the
+   venv is invisible → `ModuleNotFoundError`. Fix: `/workspace/sfvenv/bin/python
+   -m torch.distributed.run` (run_train.sh).
+2. **Data schema**: SpecForge reads a `conversations` column; gen_data.py wrote
+   `messages`. Fix: rename key (gen_data.py + one-shot sed on existing 37K rows).
+3. **cross_entropy OOM over full 262144 vocab at bs8** (tried +16 GB, 15.5 free).
+   Fix: bs2 × accum4 (effective batch 8 preserved) + PYTORCH_CUDA_ALLOC_CONF=
+   expandable_segments:True. Steady 141 GB.
+
+Config: 36,864 rows (capped chunk-1; enough for warm-start), block_size 8, 1 epoch,
+lr 2e-4, maxlen 2048. ~4.3 h/epoch; save-interval 2000 optimizer-steps →
+first exportable ckpt ~2.6 h, final at ~4604 steps. Then export_head.py →
+DFLASH=/workspace/dflash_ft_vllm bash dflash.sh (d8/d12/d16 + autotuned peak).
+
+Also: pod git pulls abort when an on-pod `sed` leaves run_train.sh modified —
+always `git checkout -- <file>` before pull. And `pkill -f <pat>` self-matches
+the SSH command's own cmdline (→ 255); kill by explicit PID instead.
