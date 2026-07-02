@@ -53,8 +53,18 @@ if "_SGLANG_AVAILABLE" not in s:
         else:
             out.append(l)
     s = "".join(out)
-    s = s.replace("class SGLangDFlashTargetModel(DFlashTargetModel):",
-                  "_SGLANG_AVAILABLE = False\n\nclass SGLangDFlashTargetModel(DFlashTargetModel):  # unusable without sglang")
+    stub = (
+        "\n# [patch] sglang unavailable: stub names referenced in annotations/bodies\n"
+        "_SGLANG_AVAILABLE = False\n"
+        "ModelConfig = Req = ScheduleBatch = Scheduler = CacheInitParams = None\n"
+        "RadixCache = CaptureHiddenMode = ForwardBatch = SamplingParams = None\n"
+        "ServerArgs = SpeculativeAlgorithm = SGLangRunner = None\n"
+        "def require_mlp_sync(*a, **k): raise RuntimeError('sglang not installed')\n"
+        "def require_mlp_tp_gather(*a, **k): raise RuntimeError('sglang not installed')\n\n"
+    )
+    anchor = "from specforge.distributed import get_tp_group"
+    assert anchor in s, "stub anchor moved"
+    s = s.replace(anchor, anchor + "\n" + stub, 1)
     p.write_text(s)
     print("patched dflash_target_model.py")
 PY
