@@ -21,7 +21,9 @@ from pathlib import Path
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--redhat", default="RedHatAI/gemma-4-31B-it-speculator.dflash")
-    ap.add_argument("--ft", required=True, help="SpecForge checkpoint dir (has model.safetensors)")
+    ap.add_argument("--ft", default="/workspace/dflash_ft",
+                    help="SpecForge ckpt dir (model.safetensors), OR a parent dir "
+                         "of epoch_*_step_* — latest is auto-picked")
     ap.add_argument("--dst", default="/workspace/dflash_ft_vllm")
     args = ap.parse_args()
 
@@ -30,6 +32,16 @@ def main() -> None:
 
     rh = Path(snapshot_download(args.redhat))
     ft = Path(args.ft)
+    if not (ft / "model.safetensors").exists():
+        cands = sorted(
+            ft.glob("epoch_*_step_*"),
+            key=lambda d: int(str(d).rsplit("_", 1)[-1]) if str(d).rsplit("_", 1)[-1].isdigit() else -1,
+        )
+        cands = [d for d in cands if (d / "model.safetensors").exists()]
+        if not cands:
+            raise SystemExit(f"no model.safetensors under {ft} or its epoch_*_step_* subdirs")
+        ft = cands[-1]
+        print(f"[auto] using latest checkpoint: {ft}")
     dst = Path(args.dst)
     if dst.exists():
         shutil.rmtree(dst)
