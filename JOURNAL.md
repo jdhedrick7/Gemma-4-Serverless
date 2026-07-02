@@ -221,5 +221,26 @@ seams, NOT weight bandwidth. Implication: **acceptance alone caps out ~600-760**
 (7 acc/pass ÷ 9.2 ms ≈ 760), so 1000 needs BOTH higher acceptance AND lower
 per-cycle overhead. peak_d8's spread (mean 336 / median 290 / **max 525**) shows
 high-acceptance runs already near ~525 — the finetune's job is to make that the
-*floor*, not the outlier. Honest projection: finetune ⇒ ~500-700; 1000 likely
-needs TRT-LLM's lower-overhead spec-decode loop on top. Will measure, not assume.
+*floor*, not the outlier. Honest projection: finetune ⇒ ~500-700. See L14 —
+the lower-overhead engine (TRT-LLM) that could break past that is ruled out too.
+
+## L14 — TRT-LLM ruled out for gemma-4 + NVFP4 + DFlash (both off-vLLM levers dead)
+
+Checked GPU-free before burning hours. Three independent blockers:
+1. **Open bug NVIDIA/TensorRT-LLM#12764 (Apr 2026):** "Gemma4 HF NVFP4 export
+   cannot be loaded by TRT-LLM builtin runtime (tokenizer/runtime skew)" — our
+   exact checkpoint type.
+2. **NVFP4 GEMM is Llama/Mixtral-only** in TRT-LLM release notes; Gemma not on
+   the NVFP4-GEMM list.
+3. **DFlash is not a TRT-LLM spec method** (EAGLE-1/2 in-engine, EAGLE3 via a
+   2-model PyTorch path only). And Gemma-4 itself is buggy on current TRT-LLM
+   (#14942: FlashInfer arch, kv_layout, AutoDeploy use_cache).
+
+**Consequence:** with Domino (L13) and TRT-LLM both out, **vLLM + finetuned
+DFlash head + k-sweep + autotune is the entire remaining game.** The realistic
+ceiling for THIS model+stack is ~500-700 tok/s (3.6-5× baseline). 1000 tok/s
+single-stream may be physically out of reach for a 31B dense model on one B200
+via vLLM's spec-decode loop — I'll prove the finetuned number, report it
+honestly, and not pretend a blocked path exists. If a TRT-LLM EAGLE3 route on
+the *bf16* model (sidestepping the NVFP4 loader bug) is worth trying, that's a
+separate experiment with its own engine build — flagged, not assumed.
