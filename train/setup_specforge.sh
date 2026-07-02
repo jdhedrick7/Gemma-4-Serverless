@@ -97,6 +97,35 @@ if "--draft-init-path" not in s:
     print("patched train_dflash.py (--draft-init-path)")
 PY
 
+# ---- register a correct gemma4 chat template ---------------------------------
+# SpecForge's built-in "gemma" uses <start_of_turn>/<end_of_turn> (Gemma-2/3).
+# Gemma-4 changed to <|turn>role\n ... <turn|>\n  — verified live against the
+# tokenizer. Wrong template => loss mask finds no assistant spans => dead train.
+python3 - <<'PY'
+from pathlib import Path
+p = Path("specforge/data/template.py")
+s = p.read_text()
+if 'name="gemma4"' not in s:
+    anchor = 'TEMPLATE_REGISTRY.register(\n    name="gemma",'
+    block = (
+        'TEMPLATE_REGISTRY.register(\n'
+        '    name="gemma4",\n'
+        '    template=ChatTemplate(\n'
+        '        assistant_header="<|turn>model\\n",\n'
+        '        user_header="<|turn>user\\n",\n'
+        '        system_prompt="",\n'
+        '        end_of_turn_token="<turn|>\\n",\n'
+        '    ),\n'
+        ')\n\n'
+    )
+    assert anchor in s, "gemma register anchor moved"
+    s = s.replace(anchor, block + anchor, 1)
+    p.write_text(s)
+    print("registered gemma4 template")
+else:
+    print("gemma4 template already present")
+PY
+
 # ---- smoke: imports + draft init + warm start --------------------------------
 python3 - <<'PY'
 import torch, os

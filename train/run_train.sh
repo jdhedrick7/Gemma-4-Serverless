@@ -44,7 +44,7 @@ torchrun --nproc_per_node=1 --master_port 29571 scripts/train_dflash.py \
   --draft-config-path "$INIT" \
   --draft-init-path "$INIT" \
   --train-data-path "$DATA" \
-  --chat-template gemma \
+  --chat-template gemma4 \
   --attention-backend sdpa \
   --block-size 8 \
   --batch-size 8 \
