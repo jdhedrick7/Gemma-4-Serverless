@@ -201,3 +201,25 @@ use a real .py file, never a shell heredoc, for code with escapes.)
 NOT the *data path*. The template mismatch lived in the one stage the smoke test
 didn't cover. De-risking the data path before the long run (rendering one sample
 through the real tokenizer) is what caught it.
+
+## L13 — Domino is NOT servable on our stack (fallback crossed off)
+
+vLLM v0.24.0 `SpeculativeMethod` = ngram/medusa/mlp_speculator/draft_model/
+suffix/custom_class + EagleModelTypes + NgramGPUTypes. **No "domino"** anywhere
+(0 mentions in speculative.py, registry only maps `DFlashDraftModel→qwen3_dflash`).
+Nightly is `0.23.1rc1.dev730` — a *downgrade*. So even though SpecForge can
+*train* Domino (DFlash+GRU logit correction, higher accept), vLLM can't *serve*
+it here. Fallback ladder is now: finetuned DFlash → k-sweep+autotune →
+(if still short) TRT-LLM, NOT Domino.
+
+## Sharper ceiling analysis (measured overhead is the real wall)
+
+Naive math said DFlash cycle ≈ 3 ms → but peak_d8 = 336 tok/s at 2.11 acc/pass
+means **real cycle ≈ (2.11+1)/336 = 9.2 ms**, ~3× the 3 ms ideal. That gap is
+per-step overhead: drafter fwd + sampling + detokenize + scheduler + CUDA-graph
+seams, NOT weight bandwidth. Implication: **acceptance alone caps out ~600-760**
+(7 acc/pass ÷ 9.2 ms ≈ 760), so 1000 needs BOTH higher acceptance AND lower
+per-cycle overhead. peak_d8's spread (mean 336 / median 290 / **max 525**) shows
+high-acceptance runs already near ~525 — the finetune's job is to make that the
+*floor*, not the outlier. Honest projection: finetune ⇒ ~500-700; 1000 likely
+needs TRT-LLM's lower-overhead spec-decode loop on top. Will measure, not assume.
