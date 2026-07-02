@@ -94,13 +94,16 @@ def main() -> None:
     llm = LLM(
         model=args.model,
         max_model_len=args.max_model_len,
-        gpu_memory_utilization=0.92,
+        gpu_memory_utilization=0.95,
+        kv_cache_dtype="fp8",          # 2x KV pool -> ~2x concurrency (greedy: precision irrelevant)
+        max_num_seqs=512,              # allow the bigger pool to actually fill
+        max_num_batched_tokens=32768,  # more prefill+decode scheduling headroom
         enforce_eager=False,
         limit_mm_per_prompt={"image": 0},
     )
     sp = SamplingParams(temperature=0.0, max_tokens=args.max_tokens)
 
-    CHUNK = 4096
+    CHUNK = 24576   # ~5 chunks over 120k -> few drain/render gaps vs 30
     with out.open("a") as f:
         for i in range(0, len(todo), CHUNK):
             batch = todo[i : i + CHUNK]
