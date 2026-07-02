@@ -23,10 +23,17 @@ PORT="${PORT:-8000}"
 BASE="http://localhost:${PORT}"
 TRIALS="${TRIALS:-10}"
 MAXTOK="${MAXTOK:-512}"
-STARTUP_TRIES="${STARTUP_TRIES:-240}"   # x3s = 12 min max cold start (first pull can be slow)
+STARTUP_TRIES="${STARTUP_TRIES:-460}"   # x3s = 23 min; first launch does ~13min FlashInfer autotune + ~3min load
 RESULTS="${RESULTS:-/workspace/tune_results}"
 BENCH="${BENCH:-$(cd "$(dirname "$0")" && pwd)/benchmark.py}"
 mkdir -p "$RESULTS"
+
+# Persist FlashInfer NVFP4 autotune + vLLM compile caches on the volume so the
+# ~13-min fp4_gemm autotune runs ONCE (rung 1), then all later rungs reuse it in
+# seconds — and every rung shares identical tuned kernels (fair comparison).
+export VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR="${VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR:-/workspace/.cache/fi_autotune}"
+export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/workspace/.cache/vllm}"
+mkdir -p "$VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR" "$VLLM_CACHE_ROOT"
 
 # Rock-solid flags only — shared by EVERY rung (a bad one here kills all rungs).
 COMMON_ARGS=(--max-model-len 32768 --gpu-memory-utilization 0.90 --port "$PORT")
@@ -82,9 +89,14 @@ run_cfg () {
   kill "$pid" 2>/dev/null
   for ((i=0; i<40; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 2; done
   kill -9 "$pid" 2>/dev/null
-  pkill -9 -f "vllm serve" 2>/dev/null
-  for ((i=0; i<30; i++)); do curl -sf "$BASE/health" >/dev/null 2>&1 || break; sleep 2; done
-  sleep 5
+  pkill -9 -f "vllm" 2>/dev/null          # also reaps orphaned EngineCore subprocess
+  # wait for GPU VRAM to actually free (prevents next-rung OOM), up to ~60s
+  for ((i=0; i<30; i++)); do
+    u=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
+    [ "${u:-99999}" -lt 5000 ] 2>/dev/null && break
+    sleep 2
+  done
+  sleep 3
 }
 
 # ---- the ladder (each rung adds one lever) ----------------------------------
