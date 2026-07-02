@@ -152,6 +152,9 @@ fi
 if [ "${RUN_D4:-0}" = 1 ]; then
   rung d4 --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 4)"
 fi
+if [ "${RUN_D12:-0}" = 1 ]; then
+  rung d12 --max-num-seqs 32 --async-scheduling --limit-mm-per-prompt "$NOIMG" --speculative-config "$(SPECDF 12)"
+fi
 # k=16 needs headroom: default max_num_seqs(1024) x (k+1) blows the 8192-token
 # scheduling budget (observed: max_num_scheduled_tokens=-7168). Single-stream
 # doesn't need >32 seqs.
