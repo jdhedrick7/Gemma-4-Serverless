@@ -244,3 +244,31 @@ via vLLM's spec-decode loop — I'll prove the finetuned number, report it
 honestly, and not pretend a blocked path exists. If a TRT-LLM EAGLE3 route on
 the *bf16* model (sidestepping the NVFP4 loader bug) is worth trying, that's a
 separate experiment with its own engine build — flagged, not assumed.
+
+## L15 — CORRECTION to L14: TRT-LLM IS viable on B200 (deep-read of the threads + docs)
+
+L14 was too pessimistic — it read search snippets, not the source. Re-reading the
+actual issue threads + main-branch docs (user directive: fix TRT-LLM myself if
+vLLM < 1000):
+
+1. **#12764 (gemma4 NVFP4 load) is CLOSED** — "Gemma 4 is now supported on the
+   latest main" (2026-05-09). Failures were **DGX Spark/GB10 (aarch64)** +
+   tokenizer `extra_special_tokens`-as-list + transformers skew — NOT B200.
+   Official `nvidia/Gemma-4-31B-IT-NVFP4` exists.
+2. **#14942 is an L4 (SM89)** — "FlashInfer unsupported architecture" = trtllm-gen
+   FMHA has no SM89 cubins. **B200 = SM100, the exact trtllm-gen target.** Not our bug.
+3. **DFlash is a FIRST-CLASS TRT-LLM spec method** (`DFlashDecodingConfig`,
+   `decoding_type: DFlash`, params `speculative_model` + `target_layer_ids` =
+   our head's `aux_hidden_state_layer_ids [1,17,29,47,58]`). Our finetuned DFlash
+   head can drop straight in. EAGLE3 also available (also target-agnostic drafter).
+
+**The only real gap:** support matrix shows `Gemma4 EAGLE-3/DFlash: No` = the
+**aux-hidden-state capture isn't wired into the `Gemma4ForConditionalGeneration`
+class** in TRT-LLM (Llama4/Qwen3/GptOss have it). That's the ownable fix the user
+authorized — mirror those classes' `aux_hidden_states` exposure for Gemma4.
+TRT-LLM's in-engine spec loop is exactly what beats vLLM's 9.2 ms Python-side wall.
+
+**Endgame:** (1) measure finetuned DFlash on vLLM. (2) if < 1000, stand up
+TRT-LLM latest-main on the B200, serve gemma-4 + our DFlash head via
+`DFlashDecodingConfig`; if Gemma4 aux-capture is missing, patch the model class.
+That path is now the active fallback, not "flagged/not assumed".
