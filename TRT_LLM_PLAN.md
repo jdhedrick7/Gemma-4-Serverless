@@ -67,13 +67,29 @@ trtllm-serve serve /workspace/gemma4_v2_text \   # bf16 target (sidesteps NVFP4 
 ```
 Then benchmark.py against :8000 (same harness).
 
-## Container
-`nvcr.io/nvidia/tensorrt-llm/release:<latest>` (or build main). Editable install
-of the patched `modeling_gemma4.py` (site-packages or `-e` checkout).
+## Container — REQUIRES ITS OWN POD (cannot pip into the vLLM container)
+Verified GPU-free: TRT-LLM pip wheels conflict irreconcilably with our vLLM
+container — (a) torch 2.9.x/cu13x vs our 2.11.0/cu128, (b) TRT-LLM pins
+transformers 4.57.1 but gemma-4 needs >=5.5 (issue #12764 "Failure C"),
+(c) CUDA 13.x vs 12.8. So do NOT `pip install tensorrt-llm` here.
+
+Instead: launch a SEPARATE RunPod pod with the NGC container
+`nvcr.io/nvidia/tensorrt-llm/release:<recent>` (1.3.0rc17+ ships
+transformers 5.5.4 which supports gemma-4, per issue #14942) attached to the
+SAME `/workspace` network volume. The bf16 target (`/workspace/gemma4_v2_text`),
+finetuned head (`/workspace/dflash_ft_vllm`), and repo all persist across the
+swap — nothing to re-transfer. `trtllm-serve` ships in that container.
+`trtllm_serve.sh` runs there as-is (it already checks for `trtllm-serve` on PATH).
 
 ## Order of operations
-1. Measure finetuned DFlash on vLLM first (running now).
-2. If < 1000: spin TRT-LLM on the SAME B200 (kill vLLM first — one GPU), apply
-   the modeling_gemma4.py patch, serve + bench. NVFP4 target if loader is clean
-   on main; else bf16 target (still fast — decode is spec-bound, not weight-bound).
+1. Measure finetuned DFlash on vLLM first (running now) — needs the current
+   vLLM container/pod.
+2. If < 1000: **stop the vLLM pod**, launch a TRT-LLM-container pod on the same
+   `/workspace` volume (same B200 region), `git pull` in /workspace/Gemma-4-
+   Serverless, run `patch_trtllm_gemma4.py` (editable-installs into the
+   container's tensorrt_llm), then `bash train/trtllm_serve.sh` + benchmark.py.
+   bf16 target sidesteps NVFP4 loader bug; decode is spec-bound not weight-bound.
 3. Compare; keep the winner. Record in JOURNAL + MODEL_CARD.
+
+Note: patch_trtllm_gemma4.py resolves tensorrt_llm via importlib, so it patches
+whatever install is in the TRT-LLM container automatically.
