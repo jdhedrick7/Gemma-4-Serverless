@@ -314,3 +314,14 @@ DFLASH=/workspace/dflash_ft_vllm bash dflash.sh (d8/d12/d16 + autotuned peak).
 Also: pod git pulls abort when an on-pod `sed` leaves run_train.sh modified —
 always `git checkout -- <file>` before pull. And `pkill -f <pat>` self-matches
 the SSH command's own cmdline (→ 255); kill by explicit PID instead.
+
+## L18 — export pipeline validated on a REAL checkpoint (not just unit test)
+
+At training step 2000, CPU-exported `epoch_0_step_2000` while training continued
+on GPU (export is CPU-only, zero contention). Result: `export_head.py` overwrote
+58 trained tensors, kept 4 frozen (embed/lm_head/d2t/t2d), missing 0, extra 0 →
+**62-tensor vLLM head**, config.json in original RedHat speculators format
+(vLLM loads unchanged). Confirms: SpecForge saves with RedHat-matching keys (no
+`draft_model.` prefix, single unsharded file, no domino modules). The whole
+downstream chain (export → dflash.sh DFLASH=path) is now proven on real
+artifacts. Final checkpoint export will be a known-good one-liner.
