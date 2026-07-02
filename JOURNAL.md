@@ -114,25 +114,37 @@ vllm serve jdfelo/gemma-4-31B-v2-NVFP4 \
 # + FlashInfer autotune ON (default) => 336.5 tok/s mean, 525 max
 ```
 
-## Plan to 1000 (active)
+## Plan to 1000 (active — head finetune pipeline built + running)
 
-1. **Finetune the DFlash head on v2's own outputs** (the L8 lever; expected
-   2.11→~4.5 accepted/draft ⇒ ~1.8× ⇒ ~600+):
-   - `train/gen_data.py` — v2-NVFP4 batch-regenerates 120K
-     ultrachat+magpie prompts, greedy (matches serving). RUNNING on pod.
-   - `train/extract_text_model.py` — bf16 text-only Gemma4ForCausalLM from
-     multimodal v2 (SpecForge HF target backend needs flat config). RUNNING (CPU).
-   - SpecForge `scripts/train_dflash.py --target-model-backend hf`
-     (+ D-PACE loss); gemma chat template exists. Init from RedHat head if
-     state-dict maps cleanly, else from scratch (~800K-sample recipe took
-     6 epochs; we finetune fewer).
-   - Export → vllm speculators format → re-benchmark d8/d16.
-2. autotuned d16 (only if finetuned head shifts the k tradeoff).
-3. If still short: Domino (DFlash+GRU logit correction, SpecForge), TRT-LLM
-   comparison, deeper drafter.
+**L10 — SpecForge DFlash draft maps 1:1 onto the RedHat head.** Converter kept
+58 tensors (layers.*, fc, hidden_norm, norm = 2.54 B), dropped 4
+(embed_tokens/lm_head/d2t/t2d — SpecForge borrows target embed+head at runtime,
+full 262144 vocab, no compression). Warm-start smoke: loaded 58, missing 0,
+unexpected 0. So finetune = true warm start from RedHat, not from scratch.
 
-## Open questions
+**I6 — SpecForge installs alongside vLLM without conflict** via
+`venv --system-site-packages` + `pip install --no-deps` (reuses pod
+torch 2.11+cu128). Its hard dep sglang==0.5.14 is unwanted; two module-level
+sglang imports guarded/stubbed (annotations eval at class-def → stub the NAMES,
+not just the import). `yunchang` is a real dep (seq-parallel), installed.
+`--draft-init-path` patched into train_dflash.py for warm start.
 
-- Does SpecForge's `DFlashDraftModel` state-dict map 1:1 onto the RedHat
-  vLLM-speculators checkpoint? (converter TBD on pod)
-- d16-autotuned vs d8-autotuned with the finetuned head.
+### Pipeline (all scripts in `train/`, dry-run/smoke-validated)
+1. `gen_data.py` — v2-NVFP4 batch-regenerates 119,642 ultrachat+magpie prompts,
+   greedy (matches serving). RUNNING on pod → `/workspace/train_data/v2_greedy.jsonl`.
+2. `extract_text_model.py` — DONE. bf16 flat-config Gemma4ForCausalLM (5376
+   hidden, 60 layers) at `/workspace/gemma4_v2_text` (SpecForge HF target needs
+   flat config; AutoModelForCausalLM kept it nested → explicit transplant).
+3. `convert_head.py` — DONE. RedHat head → `/workspace/dflash_init` (SpecForge fmt).
+4. `setup_specforge.sh` — DONE. venv + patches + warm-start smoke pass.
+5. `run_train.sh` — QUEUED (waits for gen DONE). warm-start finetune, block_size 8,
+   bs4×accum2, 2 epochs, lr 2e-4, sdpa attn → `/workspace/dflash_ft/`.
+6. `export_head.py` — merge finetuned 58 tensors back onto RedHat template
+   (keep embed/lm_head/d2t/t2d + speculators config) → vLLM serves unchanged.
+7. re-benchmark d8/d16 with finetuned head; autotuned peak.
+
+Expected: accepted/draft 2.11 → ~4-5 ⇒ ~1.8× ⇒ **~600+ tok/s**; then d16 +
+autotune. If short of 1000: Domino (DFlash+GRU, SpecForge), deeper drafter,
+TRT-LLM compare.
+
+## Scoreboard peak so far: **peak_d8 = 336.5 tok/s mean (525 max), 2.40× baseline.**
