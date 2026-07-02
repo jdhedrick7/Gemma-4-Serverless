@@ -73,6 +73,31 @@ needs it again.
 
 ---
 
+## Phase A½ — Tune (one pod pass, ~50 min, finds the max-tok/s flags)
+
+Runs the whole flag ladder unattended and prints a summary table:
+baseline → fp8 KV → +async-scheduling → EAGLE3 k2/k3/k5, then re-runs the
+winner **with FlashInfer autotune** for the true peak (autotune is skipped on
+comparison rungs — v0.24.0 can't cache it, so paying its ~13 min once, on the
+winner only, is the cheap correct move).
+
+Pod: **1× B200 (180 GB)**, image `vllm/vllm-openai:v0.24.0`, 40 GB container
+disk, network volume at `/workspace`, SSH start command (see B4 notes). Paste:
+
+```bash
+cd /workspace && { command -v git && command -v curl; } >/dev/null 2>&1 || { apt-get update -q && apt-get install -y -q git curl; }; rm -rf Gemma-4-Serverless && git clone -q https://github.com/jdhedrick7/Gemma-4-Serverless && cd Gemma-4-Serverless && { setsid bash -c 'MODEL=jdfelo/gemma-4-31B-v2-NVFP4 bash tune_ladder.sh > /workspace/ladder.log 2>&1' & } && sleep 3 && tail -f /workspace/ladder.log
+```
+
+- Detached (`setsid`): Ctrl-C the `tail` anytime; re-attach with
+  `tail -f /workspace/ladder.log`.
+- Artifacts: `/workspace/tune_results/` (`bench_*.txt`, `serve_*.log`); summary
+  table + `ladder winner:` line print at the end.
+- Knobs: `PEAK_RERUN=0` (skip autotuned peak), `TRIALS`, `STARTUP_TRIES`,
+  `RUN_DFLASH=1` (nightly image only).
+- Take the winning rung's flags into the Phase B env/start args.
+
+---
+
 ## Phase B — Serve (RunPod Serverless, load balancer)
 
 ### B1. Get weights on the host (pick one)
