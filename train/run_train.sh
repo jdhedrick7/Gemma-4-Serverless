@@ -38,7 +38,9 @@ done
 cd "$SF"
 export HF_HOME=/workspace/.huggingface
 
-torchrun --nproc_per_node=1 --master_port 29571 scripts/train_dflash.py \
+# venv python explicitly: `torchrun` resolves to system Python where SpecForge
+# (installed --no-deps into the venv) is invisible -> ModuleNotFoundError.
+/workspace/sfvenv/bin/python -m torch.distributed.run --nproc_per_node=1 --master_port 29571 scripts/train_dflash.py \
   --target-model-path "$TARGET" \
   --target-model-backend hf \
   --draft-config-path "$INIT" \
