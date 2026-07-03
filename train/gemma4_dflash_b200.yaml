@@ -1,0 +1,37 @@
+# trtllm-serve config: gemma-4-31B-v2 NVFP4 (text-only) + RedHat DFlash base drafter
+# B200 (SM100, 183GB HBM3e). Single-stream latency tuning.
+#
+# Key differences from the NextStep RTX6000 (SM120) config:
+#  - RedHat drafter is block_size=8 -> max_draft_len=7 (dflash.py: gather pos 1..K
+#    within block_size, so K <= block_size-1). z-lab was block16 -> 15.
+#  - target_layer_ids = RedHat head's aux_hidden_state_layer_ids [1,17,29,47,58]
+#  - attn_backend FLASHINFER; patch_backend_sm routes to trtllm-gen on SM100
+#    (native H512 cubins -> no Triton H512 workaround needed, unlike SM120).
+
+attn_backend: FLASHINFER
+max_batch_size: 4            # single-stream focus; keeps CUDA graphs specialized
+max_num_tokens: 12288
+max_seq_len: 16384
+
+disable_overlap_scheduler: false
+
+kv_cache_config:
+  dtype: fp8
+  free_gpu_memory_fraction: 0.80
+  enable_block_reuse: false   # VSWA hybrid + spec decode: block reuse unsupported
+
+cuda_graph_config:
+  enable_padding: true
+  batch_sizes: [1, 2, 4]
+
+speculative_config:
+  decoding_type: DFlash
+  # z-lab is TRT-LLM-native (model_type: qwen3); RedHat head is llama/speculators
+  # format which TRT-LLM's DFlash (qwen3_dflash) cannot load. Both are base
+  # drafters on google/gemma-4-31B-it. block_size=16 -> max_draft_len=15.
+  max_draft_len: 15
+  speculative_model: z-lab/gemma-4-31B-it-DFlash
+  # mask_token_id (4) + target_layer_ids ([1,12,23,35,46,57]) auto-read from
+  # the drafter's dflash_config (matches the journal's proven config).
+
+print_iter_log: true

@@ -381,3 +381,26 @@ HURT acceptance - skip unless step-bound.
 
 New pod xgkws5h4pyz7b7 (B200, US-CA-2, vol 5vd1uvstkm). Target: NVFP4 text
 (/workspace/gemma4_v2_nvfp4_text, pre-staged). Drafter: RedHatAI DFlash base.
+
+## L22 - TRT-LLM DFlash RUNNING on B200 (bf16): best 496.9 tok/s
+
+Full patched pipeline works end-to-end, coherent output (`391; Canberra.`).
+Blockers cleared in sequence (all from/adapted-from NextStep journal):
+1. Drafter format: RedHat DFlash is llama/speculators -> TRT-LLM DFlash is qwen3-only.
+   Switched to z-lab/gemma-4-31B-it-DFlash (block16, max_draft_len=15). base drafter.
+2. kv_cache: gemma4-hybrid forces KVCacheManagerV2 -> use_kv_cache_manager_v2: true.
+3. dflash.py:258 kv_lens_cuda unconditional -> guard for FlashInfer (patch_dflash_kvlens.py, NEW).
+4. NVFP4 linear.py input_scale garbage on dynamic-act ckpt (patch_linear_nvfp4_inputscale.py, NEW).
+5. BACKEND: patch_backend_sm forces trtllm-gen on SM100(B200). trtllm-gen BREAKS
+   DFlash multi-token verify -> gibberish@zero-accept. Forced fa2 instead.
+6. fa2 can't do H512 paged prefill (10 global layers) -> patch_triton_h512_v3 (same as SM120).
+
+So B200 recipe = fa2 (50 H256 sliding) + Triton v3 (10 H512 global), NOT trtllm-gen.
+
+RESULTS (bf16 target, bench_single_stream math+code, 512 tok, temp 0):
+  math mean 353.3 / best 496.9 | code mean 151.7 / best 178.0 | overall 252.5 / best 496.9
+vs vLLM base RedHat DFlash 336.5. Already beats it on bf16.
+
+STEP ANALYSIS: step ~16ms constant; tok/s ~= accepted x 62.5. Acceptance 2.0-8.0/chunk
+(content + abliteration<->base-drafter mismatch). 16ms step is WEIGHT-BOUND (58GB bf16 read)
+-> NVFP4 target (~21GB) is the lever to break 500. Next: quantize v2->modelopt-NVFP4.
