@@ -362,3 +362,22 @@ validated against real HF header: keep 2063 (2062 LM + lm_head), drop 356 vision
 
 Status: validation pod TERMINATED (no leak, 404 confirmed). Training healthy 29%,
 ~2.9h out. Endgame serve = NVFP4 text target + finetuned DFlash head on patched rc20.
+
+## L21 - PIVOT to TRT-LLM on B200 (base drafter), using NextStep journal patches
+
+vLLM finetuned head REGRESSED: step_12000 d8 = 287 tok/s @ 1.90/8 accepted, vs
+base RedHat DFlash d8 = 336.5 @ 2.11/8. Finetune undertrained (stopped 65%, LR
+un-decayed). Base head is the number to beat. Terminated vLLM B200 (vkkadsdhy2w7mg).
+
+User dir Gemma-4-NextStep/trtllm-gemma4-dflash has PROVEN TRT-LLM patches (same
+rc20, same gemma4, DFlash) hitting 160/330 on a SLOWER RTX6000 (SM120). Reusing:
+- patch_trtllm_gemma4_dflash.py (drafter-agnostic target patch: capture hooks +
+  spec_metadata threading + base->SpecDecOneEngineForCausalLM). Supersedes my
+  incomplete patch_trtllm_gemma4.py.
+- patch_flashinfer_specdec.py, patch_backend_sm.py, linear.py input_scale=None fix (MANDATORY - else gibberish).
+B200/SM100 advantages over their SM120: native trtllm-gen cubins (SKIP their
+Triton H512 workaround), ~4.5x HBM bandwidth. attnq is a step-time lever that
+HURT acceptance - skip unless step-bound.
+
+New pod xgkws5h4pyz7b7 (B200, US-CA-2, vol 5vd1uvstkm). Target: NVFP4 text
+(/workspace/gemma4_v2_nvfp4_text, pre-staged). Drafter: RedHatAI DFlash base.
