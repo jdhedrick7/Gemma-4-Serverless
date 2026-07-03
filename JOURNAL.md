@@ -404,3 +404,32 @@ vs vLLM base RedHat DFlash 336.5. Already beats it on bf16.
 STEP ANALYSIS: step ~16ms constant; tok/s ~= accepted x 62.5. Acceptance 2.0-8.0/chunk
 (content + abliteration<->base-drafter mismatch). 16ms step is WEIGHT-BOUND (58GB bf16 read)
 -> NVFP4 target (~21GB) is the lever to break 500. Next: quantize v2->modelopt-NVFP4.
+
+## L23 - NVFP4 (modelopt) RUNNING on B200 + honest ceiling
+
+Format issue resolved: our jdfelo NVFP4 is llm-compressor/compressed-tensors
+(weight_packed keys) which TRT-LLM's pytorch backend CANNOT load. Re-quantized
+v2 bf16 -> modelopt-format NVFP4 (train/quantize_nvfp4_modelopt.py). First try
+quantized attention too -> KeyError 'v' (global layers unified-KV, no v_proj;
+fused NVFP4 QKV loader needs q/k/v - journal's documented gotcha). Fix: MLP-only
+NVFP4, all attention bf16 (matches nvidia/Gemma-4-31B-IT-NVFP4 structure). 30GB.
+
+Serves coherent ("391; Canberra.") - the linear.py input_scale fix holds on the
+real NVFP4 path.
+
+RESULTS (bench_single_stream math+code, 512 tok, temp 0, decode tok/s):
+| target        | mean  | best  | ~step |
+| bf16 (58GB)   | 252.5 | 496.9 | 16ms  |
+| NVFP4-MLP 30GB| 323.0 | 461.1 | 13ms  |
+vLLM baseline (RedHat DFlash): 336.5.
+
+THE WALL IS ACCEPTANCE, not step time. At 13ms step, full accept (15+1) ~= 1200
+tok/s, but real content accepts 4.5-6/chunk -> 330-460. Same regime as the
+journal (3.5-7.5 accept, concluded 500-700 realistic / 1000 out of reach).
+
+KEY STRATEGIC INSIGHT: TRT-LLM DFlash is qwen3-ONLY. Our finetune was on the
+RedHat/llama head (for vLLM) - it CANNOT load in TRT-LLM regardless of quality.
+To improve TRT-LLM acceptance we'd need to finetune the z-lab (qwen3) drafter on
+v2. The vLLM-finetune and TRT-LLM paths diverged at the drafter architecture.
+
+Peak so far: 496.9 (bf16 lucky chunk) / 461 (NVFP4). Mean best: 323 (NVFP4).
