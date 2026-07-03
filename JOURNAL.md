@@ -459,3 +459,11 @@ vs vLLM baseline 336.5 -> ~1.4x best. 1000 not reached: acceptance-bound
 (z-lab base drafter vs abliterated v2 target; TRT-LLM DFlash is qwen3-only so the
 RedHat/llama finetune cannot load here - would need z-lab finetuned on v2).
 =========================================================
+
+## L25 - spun down (billing stopped)
+
+B200 pod xgkws5h4pyz7b7 TERMINATED (user call after winning config locked).
+Zero pods running. Volume 5vd1uvstkm persists (NVFP4 target, bf16 target, z-lab
+drafter cache, repo, results) - resumable for the z-lab-on-v2 finetune lever if
+ever pursued. FINAL: TRT-LLM NVFP4 DFlash on B200 = 461 best / 323 mean tok/s,
+~1.4x the vLLM 336.5 baseline. Ceiling acceptance-bound; documented in L24.
