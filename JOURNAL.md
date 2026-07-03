@@ -433,3 +433,29 @@ To improve TRT-LLM acceptance we'd need to finetune the z-lab (qwen3) drafter on
 v2. The vLLM-finetune and TRT-LLM paths diverged at the drafter architecture.
 
 Peak so far: 496.9 (bf16 lucky chunk) / 461 (NVFP4). Mean best: 323 (NVFP4).
+
+## L24 - ceiling confirmed + WINNING CONFIG
+
+Draft-len sweep (NVFP4-MLP target):
+  K=7  : 243.5 mean / 374 best
+  K=15 : 323.0 mean / 461 best   <- winner (drafter block_size=16 caps K at 15)
+Why higher K wins: single-stream step is WEIGHT-READ-bound (~30GB), not verify-
+batch-bound. K+1 tokens through the target cost ~same as 1; higher K just raises
+the accept ceiling at ~equal step time. Draft-len lever exhausted.
+
+Two real levers both swept: weight precision (bf16->NVFP4, +28% mean) and draft
+length (7 vs 15). Ceiling = acceptance-bound, ~13ms step.
+
+===================== WINNING CONFIG =====================
+Container: nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc20 on 1x B200 (SM100)
+Target:    gemma4_v2_nvfp4_mlp (v2 abliterated, text-only, MLP-only NVFP4 modelopt, 30GB)
+Drafter:   z-lab/gemma-4-31B-it-DFlash (qwen3, block16), max_draft_len=15
+Attn:      fa2 (50 H256 sliding) + Triton v3 (10 H512 global); NOT trtllm-gen
+Patches:   patch_trtllm_gemma4_dflash + flashinfer_specdec + backend_sm(forced fa2)
+           + triton_h512_v3 + patch_dflash_kvlens + patch_linear_nvfp4_inputscale
+KV:        auto (bf16); CUDA graphs bs[1,2,4]; use_kv_cache_manager_v2: true
+PEAK: 461 tok/s (NVFP4) / 496.9 (bf16 lucky chunk) | MEAN: 323 tok/s (NVFP4)
+vs vLLM baseline 336.5 -> ~1.4x best. 1000 not reached: acceptance-bound
+(z-lab base drafter vs abliterated v2 target; TRT-LLM DFlash is qwen3-only so the
+RedHat/llama finetune cannot load here - would need z-lab finetuned on v2).
+=========================================================
